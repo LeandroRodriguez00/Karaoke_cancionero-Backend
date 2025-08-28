@@ -1,4 +1,10 @@
+// server/src/models/Request.js
 import mongoose from 'mongoose'
+
+// ================= Constantes públicas (reutilizables en rutas)
+export const REQUEST_STATUS = ['pending', 'on_stage', 'done', 'no_show']
+export const REQUEST_SOURCE = ['public', 'quick']
+export const REQUEST_PERFORMER = ['guest', 'host']
 
 // Normalizador suave: quita dobles espacios, NBSP y recorta extremos
 const clean = (s) =>
@@ -34,8 +40,8 @@ const RequestSchema = new mongoose.Schema(
     },
 
     // Observaciones: guarda en "notes"
-    // - Soporta alias "observaciones" (vía alias nativo de Mongoose)
-    // - Soporta "obs" (vía virtual más abajo)
+    // - Soporta alias "observaciones" (alias nativo de Mongoose)
+    // - Soporta "obs" (virtual más abajo)
     notes: {
       type: String,
       trim: true,
@@ -44,10 +50,10 @@ const RequestSchema = new mongoose.Schema(
       alias: 'observaciones',
     },
 
-    // Origen del pedido
+    // Origen del pedido (público o carga rápida del host)
     source: {
       type: String,
-      enum: ['public', 'quick'],
+      enum: REQUEST_SOURCE,
       default: 'public',
       index: true,
     },
@@ -55,7 +61,7 @@ const RequestSchema = new mongoose.Schema(
     // Quién canta
     performer: {
       type: String,
-      enum: ['guest', 'host'],
+      enum: REQUEST_PERFORMER,
       default: 'guest',
       index: true,
     },
@@ -63,7 +69,7 @@ const RequestSchema = new mongoose.Schema(
     // Estado para el admin
     status: {
       type: String,
-      enum: ['pending', 'on_stage', 'done', 'no_show'],
+      enum: REQUEST_STATUS,
       default: 'pending',
       index: true,
     },
@@ -99,4 +105,12 @@ RequestSchema.index({ status: 1, createdAt: -1 })
 RequestSchema.index({ source: 1, createdAt: -1 })
 RequestSchema.index({ performer: 1, createdAt: -1 })
 
-export default mongoose.models.Request || mongoose.model('Request', RequestSchema)
+// Exponer lista de estados permitidos para usar en rutas (validación)
+RequestSchema.statics.ALLOWED_STATUS = REQUEST_STATUS
+
+// Export default y named para evitar problemas de import
+const Request =
+  mongoose.models.Request || mongoose.model('Request', RequestSchema)
+
+export { Request }
+export default Request

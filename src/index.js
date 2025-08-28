@@ -1,3 +1,4 @@
+// server/src/index.js
 import 'dotenv/config.js'
 import express from 'express'
 import http from 'http'
@@ -10,7 +11,7 @@ import healthRouter from './routes/health.js'
 import adminRouter from './routes/admin.js'
 import songsRouter from './routes/songs.js'
 import artistsRouter from './routes/artists.js'
-import requestsRouter from './routes/requests.routes.js' // asegúrate que el archivo se llame así
+import requestsRouter from './routes/requests.routes.js' // 👈 plural y nombre exacto
 import registerSocket from './socket.js'
 
 const PORT = process.env.PORT || 4000
@@ -55,18 +56,14 @@ const io = new SocketIOServer(server, {
     origin: corsOptions.origin,
     credentials: corsOptions.credentials,
     methods: corsOptions.methods,
+    allowedHeaders: corsOptions.allowedHeaders, // 👈 también acá
   },
 })
 
 // Exponer io para controladores (req.app.get('io'))
 app.set('io', io)
 
-// Registro de eventos Socket.IO (usá UNO de los dos: este log o el de registerSocket)
-io.on('connection', (socket) => {
-  console.log('🔌 Socket conectado:', socket.id)
-})
-
-// Handlers de negocio de sockets
+// Handlers centralizados de sockets
 registerSocket(io)
 
 // (Opcional) Middleware de error JSON al final
