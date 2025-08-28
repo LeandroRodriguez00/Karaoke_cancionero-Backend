@@ -8,6 +8,7 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "import:csv": "node scripts/importCsv.js",
+    "import:csv:replace": "node scripts/importCsv.js --replace",
     "sync:indexes": "node scripts/syncIndexes.js"
   },
   "dependencies": {

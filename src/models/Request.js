@@ -1,25 +1,80 @@
-import mongoose from 'mongoose';
+import mongoose from 'mongoose'
+
+// Normalizador suave: quita dobles espacios, NBSP y recorta extremos
+const clean = (s) =>
+  typeof s === 'string'
+    ? s.replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim()
+    : s
 
 const RequestSchema = new mongoose.Schema(
   {
-    fullName: { type: String, required: true, trim: true, maxlength: 120 },
-    artist:   { type: String, required: true, trim: true },
-    title:    { type: String, required: true, trim: true },
+    fullName: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 80,
+      set: clean,
+    },
+    artist: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 1,
+      maxlength: 120,
+      set: clean,
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      minlength: 1,
+      maxlength: 180,
+      set: clean,
+    },
 
     // Opcional en el formulario
-    notes:    { type: String, trim: true, maxlength: 500 },
+    notes: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      set: clean,
+    },
 
     // Quién lo originó (público o “Yo canto” del host)
-    source:   { type: String, enum: ['public', 'quick'], default: 'public', index: true },
+    source: {
+      type: String,
+      enum: ['public', 'quick'],
+      default: 'public',
+      index: true,
+    },
 
     // Estado para el admin (Etapa 5)
-    status:   { type: String, enum: ['pending','on_stage','done','no_show'], default: 'pending', index: true },
+    status: {
+      type: String,
+      enum: ['pending', 'on_stage', 'done', 'no_show'],
+      default: 'pending',
+      index: true,
+    },
   },
-  { timestamps: true }
-);
+  {
+    timestamps: true,
+    versionKey: false, // saca __v
+    toJSON: {
+      virtuals: true,
+      transform: (_doc, ret) => {
+        ret.id = ret._id.toString()
+        delete ret._id
+        return ret
+      },
+    },
+    toObject: { virtuals: true },
+  }
+)
 
-// Orden típico para la cola: más recientes primero, filtrables por estado
-RequestSchema.index({ status: 1, createdAt: -1 });
+// Índices útiles para cola y filtros
+RequestSchema.index({ createdAt: -1 })                 // ordenar por recientes
+RequestSchema.index({ status: 1, createdAt: -1 })      // típico en admin
+RequestSchema.index({ source: 1, createdAt: -1 })      // filtrar pedidos "quick"
 
-// Evita OverwriteModelError con hot-reload
-export default mongoose.models.Request || mongoose.model('Request', RequestSchema);
+export default mongoose.models.Request || mongoose.model('Request', RequestSchema)
