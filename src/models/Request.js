@@ -41,11 +41,19 @@ const RequestSchema = new mongoose.Schema(
       set: clean,
     },
 
-    // Quién lo originó (público o “Yo canto” del host)
+    // Quién lo originó (público o atajo del host)
     source: {
       type: String,
       enum: ['public', 'quick'],
       default: 'public',
+      index: true,
+    },
+
+    // QUIÉN CANTA (NUEVO): invitado (guest) o host/cantante
+    performer: {
+      type: String,
+      enum: ['guest', 'host'],
+      default: 'guest',
       index: true,
     },
 
@@ -75,6 +83,7 @@ const RequestSchema = new mongoose.Schema(
 // Índices útiles para cola y filtros
 RequestSchema.index({ createdAt: -1 })                 // ordenar por recientes
 RequestSchema.index({ status: 1, createdAt: -1 })      // típico en admin
-RequestSchema.index({ source: 1, createdAt: -1 })      // filtrar pedidos "quick"
+RequestSchema.index({ source: 1, createdAt: -1 })      // filtrar pedidos por origen
+RequestSchema.index({ performer: 1, createdAt: -1 })   // filtrar host vs invitado
 
 export default mongoose.models.Request || mongoose.model('Request', RequestSchema)

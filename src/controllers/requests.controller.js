@@ -1,16 +1,12 @@
+// server/src/controllers/requests.controller.js
 import Request from '../models/Request.js'
 
-const MAX = {
-  fullName: 80,
-  artist: 120,
-  title: 180,
-  notes: 500,
-}
+const MAX = { fullName: 80, artist: 120, title: 180, notes: 500 }
 
 // Sanitizador cortito
 const s = (v) => (typeof v === 'string' ? v.trim() : '')
 
-const validate = ({ fullName, artist, title, notes, source }) => {
+const validate = ({ fullName, artist, title, notes, source, performer }) => {
   const errors = []
 
   if (!s(fullName)) errors.push({ field: 'fullName', message: 'fullName es requerido' })
@@ -24,28 +20,34 @@ const validate = ({ fullName, artist, title, notes, source }) => {
   if (s(title).length    > MAX.title)    errors.push({ field: 'title',    message: `Máximo ${MAX.title} chars` })
   if (s(notes).length    > MAX.notes)    errors.push({ field: 'notes',    message: `Máximo ${MAX.notes} chars` })
 
-  if (source && !['public', 'quick'].includes(source)) {
+  if (source && !['public', 'quick'].includes(source))
     errors.push({ field: 'source', message: 'source inválido' })
-  }
+
+  if (performer && !['guest', 'host'].includes(performer))
+    errors.push({ field: 'performer', message: 'performer inválido' })
 
   return errors
 }
 
 export async function createRequest(req, res) {
   try {
-    const { fullName, artist, title, notes, source } = req.body || {}
+    const { fullName, artist, title, notes, source, performer } = req.body || {}
 
-    const errors = validate({ fullName, artist, title, notes, source })
+    const errors = validate({ fullName, artist, title, notes, source, performer })
     if (errors.length) {
       return res.status(400).json({ error: 'VALIDATION_ERROR', details: errors })
     }
+
+    const sourceNorm = source === 'quick' ? 'quick' : 'public'
+    const performerNorm = performer === 'host' ? 'host' : 'guest'
 
     const doc = await Request.create({
       fullName: s(fullName),
       artist: s(artist),
       title: s(title),
       notes: s(notes) || undefined,
-      source: source === 'quick' ? 'quick' : 'public',
+      source: sourceNorm,
+      performer: performerNorm,
     })
 
     // Emitimos para la Etapa 5 (admin en vivo)
@@ -57,6 +59,7 @@ export async function createRequest(req, res) {
         artist: doc.artist,
         title: doc.title,
         source: doc.source,
+        performer: doc.performer, // 👈 ahora viaja quién canta
         status: doc.status,
         createdAt: doc.createdAt,
       })
@@ -64,11 +67,9 @@ export async function createRequest(req, res) {
 
     return res.status(201).json({ ok: true, request: doc })
   } catch (err) {
-    // Si cae una ValidationError de Mongoose, devolvemos 400 prolijo
     if (err?.name === 'ValidationError') {
       const details = Object.entries(err.errors).map(([field, e]) => ({
-        field,
-        message: e.message || 'Inválido',
+        field, message: e.message || 'Inválido',
       }))
       return res.status(400).json({ error: 'VALIDATION_ERROR', details })
     }
