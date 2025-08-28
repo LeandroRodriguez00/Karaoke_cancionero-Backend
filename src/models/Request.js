@@ -33,15 +33,18 @@ const RequestSchema = new mongoose.Schema(
       set: clean,
     },
 
-    // Opcional en el formulario
+    // Observaciones: guarda en "notes"
+    // - Soporta alias "observaciones" (vía alias nativo de Mongoose)
+    // - Soporta "obs" (vía virtual más abajo)
     notes: {
       type: String,
       trim: true,
       maxlength: 500,
       set: clean,
+      alias: 'observaciones',
     },
 
-    // Quién lo originó (público o atajo del host)
+    // Origen del pedido
     source: {
       type: String,
       enum: ['public', 'quick'],
@@ -49,7 +52,7 @@ const RequestSchema = new mongoose.Schema(
       index: true,
     },
 
-    // QUIÉN CANTA (NUEVO): invitado (guest) o host/cantante
+    // Quién canta
     performer: {
       type: String,
       enum: ['guest', 'host'],
@@ -57,7 +60,7 @@ const RequestSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Estado para el admin (Etapa 5)
+    // Estado para el admin
     status: {
       type: String,
       enum: ['pending', 'on_stage', 'done', 'no_show'],
@@ -80,10 +83,20 @@ const RequestSchema = new mongoose.Schema(
   }
 )
 
+/* ========= Virtual adicional: "obs" → notes =========
+   Permite crear/actualizar usando { obs: '...' } */
+RequestSchema.virtual('obs')
+  .get(function () {
+    return this.notes
+  })
+  .set(function (v) {
+    this.notes = clean(v)
+  })
+
 // Índices útiles para cola y filtros
-RequestSchema.index({ createdAt: -1 })                 // ordenar por recientes
-RequestSchema.index({ status: 1, createdAt: -1 })      // típico en admin
-RequestSchema.index({ source: 1, createdAt: -1 })      // filtrar pedidos por origen
-RequestSchema.index({ performer: 1, createdAt: -1 })   // filtrar host vs invitado
+RequestSchema.index({ createdAt: -1 })
+RequestSchema.index({ status: 1, createdAt: -1 })
+RequestSchema.index({ source: 1, createdAt: -1 })
+RequestSchema.index({ performer: 1, createdAt: -1 })
 
 export default mongoose.models.Request || mongoose.model('Request', RequestSchema)
