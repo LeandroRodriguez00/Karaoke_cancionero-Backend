@@ -6,17 +6,24 @@ const router = Router()
 
 // ---------- Helpers internos ----------
 function normalizeEnums({ source, performer } = {}) {
-  const src = REQUEST_SOURCE.includes(source) ? source : 'public'
-  const perf = REQUEST_PERFORMER.includes(performer)
-    ? performer
+  // map legacy "user" -> "public"
+  const rawSrc = String(source || '').toLowerCase()
+  const src = REQUEST_SOURCE.includes(rawSrc) ? rawSrc : (rawSrc === 'user' ? 'public' : 'public')
+
+  const rawPerf = String(performer || '').toLowerCase()
+  const perf = REQUEST_PERFORMER.includes(rawPerf)
+    ? rawPerf
     : (src === 'quick' ? 'host' : 'guest')
+
   return { source: src, performer: perf }
 }
 
-function mapNotes(body, payload) {
-  if (typeof body?.notes === 'string') payload.notes = body.notes
-  if (typeof body?.observaciones === 'string') payload.observaciones = body.observaciones
-  if (typeof body?.obs === 'string') payload.obs = body.obs
+// Prioriza notes > observaciones > obs
+function pickNotes(body) {
+  if (typeof body?.notes === 'string') return body.notes
+  if (typeof body?.observaciones === 'string') return body.observaciones
+  if (typeof body?.obs === 'string') return body.obs
+  return undefined
 }
 
 async function createRequestDoc(body) {
@@ -28,12 +35,16 @@ async function createRequestDoc(body) {
   }
   const { source, performer } = normalizeEnums(body)
   const payload = { fullName, artist, title, source, performer }
-  mapNotes(body, payload)
+
+  const maybeNotes = pickNotes(body)
+  if (typeof maybeNotes === 'string') payload.notes = maybeNotes
+
   return Request.create(payload)
 }
 
 function emitNew(io, doc) {
-  io?.emit('request:new', {
+  if (!io) return
+  const payload = {
     _id: doc._id.toString(),
     fullName: doc.fullName,
     artist: doc.artist,
@@ -43,7 +54,12 @@ function emitNew(io, doc) {
     performer: doc.performer,
     status: doc.status,
     createdAt: doc.createdAt,
-  })
+    updatedAt: doc.updatedAt,
+  }
+
+  // ✅ una sola emisión a admins + requests
+  if (io.requestWatchersNotify) io.requestWatchersNotify('request:new', payload)
+  else io.to(['admins', 'requests']).emit('request:new', payload)
 }
 
 // ---------- Endpoints públicos ----------

@@ -12,9 +12,11 @@
     "sync:indexes": "node scripts/syncIndexes.js"
   },
   "dependencies": {
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "helmet": "^8.1.0",
     "iconv-lite": "^0.7.0",
     "mongoose": "^8.5.0",
     "morgan": "^1.10.0",

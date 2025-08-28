@@ -1,6 +1,6 @@
 import { Router } from "express";
 import Song from "../models/Song.js";
-import { normalizeForSearch, escapeRegex } from "../../utils/normalize.js";
+import { normalizeForSearch, escapeRegex } from "../utils/normalice.js";
 
 const router = Router();
 

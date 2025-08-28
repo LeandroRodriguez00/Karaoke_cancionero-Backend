@@ -21,7 +21,7 @@ router.get('/ping', (_req, res) => {
 /**
  * GET /api/admin/requests?status=pending,on_stage
  * Lista pedidos (con filtro opcional por uno o varios estados).
- * Devuelve { data, counts } donde counts trae contadores por estado.
+ * Devuelve { data, counts } donde counts trae contadores por estado en TODA la colección.
  */
 router.get('/requests', async (req, res) => {
   try {
@@ -38,10 +38,15 @@ router.get('/requests', async (req, res) => {
       if (allowed.length) filter.status = { $in: allowed }
     }
 
-    // Lista (más nuevos primero)
-    const data = await Request.find(filter).sort({ createdAt: -1 }).lean()
+    // Lista (más nuevos primero) con proyección mínima
+    const data = await Request.find(
+      filter,
+      { fullName: 1, artist: 1, title: 1, notes: 1, status: 1, source: 1, performer: 1, createdAt: 1 }
+    )
+      .sort({ createdAt: -1 })
+      .lean()
 
-    // Contadores por estado (aseguramos todas las claves)
+    // Contadores por estado (toda la colección)
     const agg = await Request.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }])
     const counts = REQUEST_STATUS.reduce((acc, s) => {
       const hit = agg.find((it) => it._id === s)
@@ -59,14 +64,13 @@ router.get('/requests', async (req, res) => {
 /**
  * PATCH /api/admin/requests/:id/status
  * Body: { status: 'pending' | 'on_stage' | 'done' | 'no_show' }
- * Cambia estado y emite 'request:update' por Socket.IO.
+ * Cambia estado y emite 'request:update' a admins+requests en una sola emisión.
  */
 router.patch('/requests/:id/status', async (req, res) => {
   try {
     const { id } = req.params
     const { status } = req.body || {}
 
-    // Validaciones rápidas
     if (!REQUEST_STATUS.includes(status)) {
       return res.status(400).json({ error: 'Estado inválido' })
     }
@@ -74,20 +78,25 @@ router.patch('/requests/:id/status', async (req, res) => {
       return res.status(400).json({ error: 'ID inválido' })
     }
 
-    // Update
-    const doc = await Request.findByIdAndUpdate(id, { $set: { status } }, { new: true })
+    const doc = await Request.findByIdAndUpdate(
+      id,
+      { $set: { status } },
+      {
+        new: true,
+        runValidators: true,
+        projection: { fullName: 1, artist: 1, title: 1, notes: 1, status: 1, source: 1, performer: 1, updatedAt: 1 },
+      }
+    ).lean()
 
     if (!doc) return res.status(404).json({ error: 'Pedido no encontrado' })
 
-    // Emitir evento en vivo
+    // Emitir evento en vivo (una sola vez a admins+requests)
     const io = req.app.get('io')
-    io?.emit('request:update', {
-      _id: doc._id.toString(),
-      status: doc.status,
-      updatedAt: doc.updatedAt,
-    })
+    const payload = { _id: doc._id.toString(), status: doc.status, updatedAt: doc.updatedAt }
+    if (io?.requestWatchersNotify) io.requestWatchersNotify('request:update', payload)
+    else io?.to(['admins', 'requests']).emit('request:update', payload)
 
-    return res.json(doc) // usa toJSON del modelo (incluye id)
+    return res.json(doc) // lean(): _id presente; front usa r._id || r.id
   } catch (err) {
     console.error('PATCH /api/admin/requests/:id/status error:', err)
     return res.status(500).json({ error: 'Error actualizando estado' })
@@ -96,7 +105,7 @@ router.patch('/requests/:id/status', async (req, res) => {
 
 /**
  * DELETE /api/admin/requests/:id
- * Elimina un pedido y emite 'request:delete'
+ * Elimina un pedido y emite 'request:delete' a admins+requests en una sola emisión.
  */
 router.delete('/requests/:id', async (req, res) => {
   try {
@@ -105,11 +114,13 @@ router.delete('/requests/:id', async (req, res) => {
       return res.status(400).json({ error: 'ID inválido' })
     }
 
-    const doc = await Request.findByIdAndDelete(id)
+    const doc = await Request.findByIdAndDelete(id).lean()
     if (!doc) return res.status(404).json({ error: 'Pedido no encontrado' })
 
     const io = req.app.get('io')
-    io?.emit('request:delete', { _id: id })
+    const payload = { _id: id }
+    if (io?.requestWatchersNotify) io.requestWatchersNotify('request:delete', payload)
+    else io?.to(['admins', 'requests']).emit('request:delete', payload)
 
     return res.json({ ok: true, deleted: 1 })
   } catch (err) {
@@ -120,13 +131,16 @@ router.delete('/requests/:id', async (req, res) => {
 
 /**
  * DELETE /api/admin/requests
- * Elimina TODOS los pedidos y emite 'requests:clear'
+ * Elimina TODOS los pedidos y emite 'requests:clear' a admins+requests en una sola emisión.
  */
-router.delete('/requests', async (_req, res) => {
+router.delete('/requests', async (req, res) => {
   try {
     const { deletedCount } = await Request.deleteMany({})
-    const io = _req.app.get('io')
-    io?.emit('requests:clear')
+    const io = req.app.get('io')
+
+    if (io?.requestWatchersNotify) io.requestWatchersNotify('requests:clear')
+    else io?.to(['admins', 'requests']).emit('requests:clear')
+
     return res.json({ ok: true, deleted: deletedCount || 0 })
   } catch (err) {
     console.error('DELETE /api/admin/requests error:', err)
