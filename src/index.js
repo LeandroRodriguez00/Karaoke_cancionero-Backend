@@ -2,11 +2,12 @@
 import 'dotenv/config.js'
 import express from 'express'
 import http from 'http'
+import cors from 'cors'
 import { Server as SocketIOServer } from 'socket.io'
 import { connectDB } from './config/db.js'
 
-// Middlewares/opts de producción centralizados
-import { applyHttpMiddlewares, getSocketOptions } from './setupProd.js'
+// Middlewares/opts de producción centralizados (helmet, compression, etc.)
+import { applyHttpMiddlewares } from './setupProd.js'
 
 // Rutas y middlewares propios
 import healthRouter from './routes/health.js'
@@ -25,18 +26,52 @@ await connectDB()
 const app = express()
 
 // ---------- Middlewares base (prod-ready) ----------
-applyHttpMiddlewares(app)              // Helmet + Compression + CORS + /api/health
+applyHttpMiddlewares(app)              // Helmet + Compression (de tu proyecto)
 app.set('etag', 'strong')
 app.use(express.json({ limit: '1mb' }))
 
-// Exponer header de paginado (como usabas antes)
+// ---------- CORS unificado (dev + prod) ----------
+/**
+ * - Permite tu dominio público (Hostinger) vía CLIENT_ORIGIN
+ * - Permite dev local (5173) por defecto
+ * - Opcional: permite cualquier *.onrender.com si CORS_ALLOW_ONRENDER=1
+ * - Mismo criterio se aplica luego a Socket.IO
+ */
+const DEV_DEFAULTS = ['http://localhost:5173', 'http://127.0.0.1:5173']
+const PROD_DEFAULTS = [process.env.CLIENT_ORIGIN].filter(Boolean)
+const EXTRA = (process.env.DEV_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+const ALLOW = [...new Set([...DEV_DEFAULTS, ...PROD_DEFAULTS, ...EXTRA])]
+const ALLOW_RENDER = process.env.CORS_ALLOW_ONRENDER === '1'
+
+const corsOrigin = (origin, cb) => {
+  if (!origin) return cb(null, true) // curl/healthchecks
+  try {
+    const okList = ALLOW.includes(origin)
+    const host = new URL(origin).hostname
+    const okRender = ALLOW_RENDER && /(?:^|\.)onrender\.com$/i.test(host)
+    return okList || okRender ? cb(null, true) : cb(new Error('CORS bloqueado: ' + origin))
+  } catch {
+    return cb(new Error('CORS origin inválido: ' + origin))
+  }
+}
+
+app.use(cors({
+  origin: corsOrigin,
+  credentials: true,
+  exposedHeaders: ['X-Total-Count'],
+}))
+
+// Exponer header de paginado (compat con clientes antiguos)
 app.use((_req, res, next) => {
   res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count')
   next()
 })
 
 // ---------- Rutas API ----------
-app.use('/api', healthRouter)          // /api/health (sigue válido si tu router agrega más checks)
+app.use('/api', healthRouter)          // /api/health
 
 app.use('/api/admin', nocache)         // evitar cache para datos en vivo
 app.use('/api/admin', adminRouter)
@@ -54,7 +89,14 @@ app.use('/api', (_req, res) => {
 
 // ---------- HTTP + Socket.IO ----------
 const httpServer = http.createServer(app)
-const io = new SocketIOServer(httpServer, getSocketOptions()) // usa CORS_ORIGINS y SOCKET_PATH
+
+const io = new SocketIOServer(httpServer, {
+  path: process.env.SOCKET_PATH || '/socket.io',
+  cors: {
+    origin: corsOrigin,
+    credentials: true,
+  },
+})
 app.set('io', io)
 registerSocket(io)
 
