@@ -1,18 +1,32 @@
-node_modules/
-coverage/
+# --- build / coverage ---
 dist/
+coverage/
 
+# --- dependencias ---
+node_modules/
+
+# --- ENV reales (NO commitear) ---
 .env
-.env.*.local
+.env.*
+# Re-incluir SOLO las plantillas (sí se commitean)
+!.env.example
+!.env.production.example
 
+# --- data (opcional) ---
+# Si no querés subir catálogos pesados al repo, dejá esto:
 data/
 *.csv
+# Si en algún momento querés incluir UN CSV de ejemplo:
+# !data/sample.csv
 
+# --- logs ---
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
+# --- SO / editores ---
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
-
-npm-debug.log*
-yarn-*.log*
-pnpm-debug.log*
