@@ -2,66 +2,48 @@
 import 'dotenv/config.js'
 import express from 'express'
 import http from 'http'
-import cors from 'cors'
-import morgan from 'morgan'
-import helmet from 'helmet'
-import compression from 'compression'
 import { Server as SocketIOServer } from 'socket.io'
-
 import { connectDB } from './config/db.js'
+
+// Middlewares/opts de producción centralizados
+import { applyHttpMiddlewares, getSocketOptions } from './setupProd.js'
+
+// Rutas y middlewares propios
 import healthRouter from './routes/health.js'
 import adminRouter from './routes/admin.js'
 import songsRouter from './routes/songs.js'
 import artistsRouter from './routes/artists.js'
-import requestsRouter from './routes/requests.routes.js' // 👈 plural y nombre exacto
+import requestsRouter from './routes/requests.routes.js'
 import registerSocket from './socket.js'
-import nocache from './middleware/nocache.js'            // ⬅️ nuevo
+import nocache from './middleware/nocache.js'
 
 const PORT = process.env.PORT || 4000
-const ORIGIN = process.env.CLIENT_ORIGIN || '*'
-const SOCKET_PATH = process.env.SOCKET_PATH || '/socket.io' // ⬅️ opcional, coordina con el client
 
-// ⚙️ CORS: si ORIGIN es "*", no mandamos credenciales; si es un dominio, sí.
-// Exponemos X-Total-Count para paginado en el cliente.
-const corsOptions = {
-  origin: ORIGIN === '*' ? '*' : ORIGIN,
-  credentials: ORIGIN !== '*',
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-admin-key'],
-  exposedHeaders: ['X-Total-Count'],
-}
-
-// ⬇️ Conexión a DB (top-level await OK en Node 18+)
+// ⬇️ Conexión a DB (top-level await)
 await connectDB()
 
 const app = express()
 
-// ---------- Middlewares base ----------
-app.set('trust proxy', 1)
+// ---------- Middlewares base (prod-ready) ----------
+applyHttpMiddlewares(app)              // Helmet + Compression + CORS + /api/health
 app.set('etag', 'strong')
-
-app.use(helmet({ contentSecurityPolicy: false }))
-app.use(compression())
-
-app.use(cors(corsOptions))
-app.options('*', cors(corsOptions)) // ✅ preflight explícito
-
 app.use(express.json({ limit: '1mb' }))
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'))
+
+// Exponer header de paginado (como usabas antes)
+app.use((_req, res, next) => {
+  res.setHeader('Access-Control-Expose-Headers', 'X-Total-Count')
+  next()
+})
 
 // ---------- Rutas API ----------
-// Health
-app.use('/api', healthRouter) // /api/health
+app.use('/api', healthRouter)          // /api/health (sigue válido si tu router agrega más checks)
 
-// Admin (no-cache + rutas)
-app.use('/api/admin', nocache)        // ⬅️ evita cache para datos en vivo
+app.use('/api/admin', nocache)         // evitar cache para datos en vivo
 app.use('/api/admin', adminRouter)
 
-// Público
 app.use('/api/songs', songsRouter)
 app.use('/api/artists', artistsRouter)
-
-// (Opcional) Evitar cache en pedidos públicos también
+// Si querés evitar cache también en pedidos públicos, descomentá:
 // app.use('/api/requests', nocache)
 app.use('/api/requests', requestsRouter)
 
@@ -71,20 +53,10 @@ app.use('/api', (_req, res) => {
 })
 
 // ---------- HTTP + Socket.IO ----------
-const server = http.createServer(app)
-const io = new SocketIOServer(server, {
-  path: SOCKET_PATH, // ⬅️ configurable
-  cors: {
-    origin: corsOptions.origin,
-    credentials: corsOptions.credentials,
-    methods: corsOptions.methods,
-    allowedHeaders: corsOptions.allowedHeaders,
-  },
-  pingInterval: 20000,
-  pingTimeout: 20000,
-})
-app.set('io', io)        // req.app.get('io') en controladores
-registerSocket(io)       // handlers centralizados
+const httpServer = http.createServer(app)
+const io = new SocketIOServer(httpServer, getSocketOptions()) // usa CORS_ORIGINS y SOCKET_PATH
+app.set('io', io)
+registerSocket(io)
 
 // ---------- Manejo centralizado de errores ----------
 app.use((err, _req, res, _next) => {
@@ -93,13 +65,11 @@ app.use((err, _req, res, _next) => {
 })
 
 // ---------- Arranque del server ----------
-server.listen(PORT, () => {
-  console.log(`✅ Server escuchando en http://localhost:${PORT}`)
-  console.log(`🌐 CORS origin: ${corsOptions.origin} (credenciales: ${corsOptions.credentials})`)
-  console.log(`🔌 Socket.IO path: ${SOCKET_PATH}`)
+httpServer.listen(PORT, () => {
+  console.log(`✅ Server escuchando en port ${PORT} (env: ${process.env.NODE_ENV})`)
 })
 
-// ---------- Manejo básico de errores no atrapados ----------
+// ---------- Errores no atrapados ----------
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason)
 })
@@ -110,7 +80,7 @@ process.on('uncaughtException', (err) => {
 // ---------- Apagado limpio ----------
 const shutdown = (signal) => () => {
   console.log(`\n${signal} recibido. Cerrando server...`)
-  server.close(() => {
+  httpServer.close(() => {
     console.log('🔻 HTTP cerrado.')
     process.exit(0)
   })
